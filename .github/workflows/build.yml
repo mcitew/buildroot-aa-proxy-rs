@@ -1,80 +1,50 @@
-name: Build SD images
+name: Build Radxa Zero 3W Image
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Allows manual triggering from GitHub UI
 
 jobs:
-  build:
+  build-image:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        board: [ aaw2b, aaw3, rpi02w, rpi0w, rpi3a, rpi4, rpi5, radxa03w, milkv-duos ]
+    timeout-minutes: 360 # 6-hour max limit on GitHub Actions
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
 
-      - name: Build Docker image
-        run: CONTAINER_ENGINE=docker ./docker-dev.sh build
-
-      - name: Build image for ${{ matrix.board }}
+      # Free up disk space on the standard GitHub runner (~14GB free by default)
+      - name: Free Disk Space
         run: |
-          set -e
-          mkdir images
-          echo "Building board: ${{ matrix.board }}"
-          CONTAINER_ENGINE=docker ./docker-dev.sh "${{ matrix.board }}"
-          IMAGE_DIR=buildroot/output/${{ matrix.board }}/images
-          
-          if [[ "${{ matrix.board }}" == aaw* ]]; then
-            TAR_NAME=images/${{ matrix.board }}-images.tar.xz
-          
-            BOOT_IMG=""
-            if [[ "${{ matrix.board }}" == "aaw3" ]]; then
-              BOOT_IMG="boot1.img boot2.img"
-            fi
-          
-            tar -cJf "$TAR_NAME" -C "$IMAGE_DIR" download.bin env.img env_r.img idblock.img uboot.img $BOOT_IMG root.img
-          else
-            IMG="$IMAGE_DIR/sdcard.img"
-            if [[ -f "$IMG" ]]; then
-              xz -c "$IMG" > images/${{ matrix.board }}-sdcard.img.xz
-            else
-              echo "WARNING: Image $IMG not found!"
-              #exit 1
-            fi
-          fi
-          
-          UPDATE_IMG="$IMAGE_DIR/update_image.swu"
-          if [[ -f "$UPDATE_IMG" ]]; then
-            cp -f "$UPDATE_IMG" images/${{ matrix.board }}.swu
-          fi
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          echo "Disk space after cleanup:"
+          df -h
 
-      - name: Upload AAW artifact
-        if: startsWith(matrix.board, 'aaw')
-        uses: actions/upload-artifact@v7
+      # Cache Buildroot source tarballs (dl/) across runs to save download time
+      - name: Cache Buildroot Downloads
+        uses: actions/cache@v4
         with:
-          name: ${{ matrix.board }}-images
-          path: images/${{ matrix.board }}-images.tar.xz
+          path: dl
+          key: ${{ runner.os }}-buildroot-dl-${{ hashFiles('**/external/**') }}
+          restore-keys: |
+            ${{ runner.os }}-buildroot-dl-
 
-      - name: Upload SD-card artifact
-        if: ${{ !startsWith(matrix.board, 'aaw') }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.board }}-sdcard
-          path: images/${{ matrix.board }}-sdcard.img.xz
+      # Build the image using your Docker workflow
+      - name: Build Radxa Zero 3W Image
+        run: |
+          chmod +x docker-dev.sh build-image.sh
+          ./build-image.sh radxa03w
 
-      - name: Upload SWU artifact
-        uses: actions/upload-artifact@v7
+      # Compress and upload the output image as a downloadable GitHub artifact
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.board }}-swu
-          path: images/${{ matrix.board }}.swu
-
-  merge:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/upload-artifact/merge@v7
-        with:
-          name: aa-proxy-rs-merged
+          name: radxa03w-sdcard-image
+          path: output/images/sdcard.img
+          if-no-files-found: error
