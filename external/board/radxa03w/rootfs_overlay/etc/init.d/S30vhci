@@ -1,0 +1,15 @@
+#!/bin/sh
+case "$1" in
+  start)
+    echo "Loading VHCI kernel module..."
+    modprobe hci_vhci
+    ;;
+  stop)
+    echo "Unloading VHCI kernel module..."
+    rmmod hci_vhci
+    ;;
+  *)
+    echo "Usage: $0 {start|stop}"
+    exit 1
+esac
+exit 0
