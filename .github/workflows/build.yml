@@ -1,50 +1,66 @@
-name: Build Radxa Zero 3W Image
+name: Build SD images
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Allows manual triggering from GitHub UI
+  workflow_dispatch:
 
 jobs:
-  build-image:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 6-hour max limit on GitHub Actions
+    strategy:
+      matrix:
+        board: [ radxa03w ]
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
-      # Free up disk space on the standard GitHub runner (~14GB free by default)
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
-          echo "Disk space after cleanup:"
+          echo "Disk space remaining:"
           df -h
 
-      # Cache Buildroot source tarballs (dl/) across runs to save download time
-      - name: Cache Buildroot Downloads
-        uses: actions/cache@v4
-        with:
-          path: dl
-          key: ${{ runner.os }}-buildroot-dl-${{ hashFiles('**/external/**') }}
-          restore-keys: |
-            ${{ runner.os }}-buildroot-dl-
+      - name: Make Scripts Executable
+        run: |
+          chmod +x docker-dev.sh || true
+          if [ -f build-image.sh ]; then chmod +x build-image.sh; fi
 
-      # Build the image using your Docker workflow
+      - name: Build Docker Container
+        run: CONTAINER_ENGINE=docker ./docker-dev.sh build
+
       - name: Build Radxa Zero 3W Image
         run: |
-          chmod +x docker-dev.sh build-image.sh
-          ./build-image.sh radxa03w
+          set -e
+          mkdir -p images
+          echo "Building board: ${{ matrix.board }}"
+          CONTAINER_ENGINE=docker ./docker-dev.sh "${{ matrix.board }}"
+          
+          # Check output locations
+          if [ -d "buildroot/output/radxa03w/images" ]; then path="buildroot/output/radxa03w/images";
+          elif [ -d "output/radxa03w/images" ]; then path="output/radxa03w/images";
+          elif [ -d "output/images" ]; then path="output/images";
+          else path="buildroot/output/images"; fi
+          
+          echo "Found build output in: $path"
+          
+          if [ -f "$path/sdcard.img" ]; then
+            xz -c "$path/sdcard.img" > images/radxa03w-sdcard.img.xz
+          else
+            echo "ERROR: sdcard.img not found in $path!"
+            ls -la "$path" || true
+            exit 1
+          fi
 
-      # Compress and upload the output image as a downloadable GitHub artifact
-      - name: Upload Image Artifact
+      - name: Upload SD-card Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: radxa03w-sdcard-image
-          path: output/images/sdcard.img
+          name: radxa03w-sdcard
+          path: images/radxa03w-sdcard.img.xz
           if-no-files-found: error
