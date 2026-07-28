@@ -8,12 +8,12 @@ on:
       target_board:
         description: 'Select board to build (or "all")'
         required: true
-        default: 'all'
+        default: 'rpi02w'
         type: choice
         options:
-          - all
           - rpi02w
           - radxa03w
+          - all
 
 jobs:
   matrix-prep:
@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: ${{ toJson(fromJson(needs.matrix-prep.outputs.boards)) }}
+        board: ["rpi02w"]
 
     steps:
       - name: Checkout Repository
