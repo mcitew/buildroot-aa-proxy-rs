@@ -50,9 +50,22 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
 
-      - name: Build local Docker environment
+      - name: Build local Podman environment
         run: |
-          docker build -t aaproxybr .
+          podman build -t aaproxybr .
+steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
+
+      - name: Build local Podman environment
+        run: |
+          podman build -t aaproxybr .
 
       - name: Build SD Image
         run: |
@@ -65,4 +78,5 @@ jobs:
           name: sdcard-${{ matrix.board }}
           path: output/${{ matrix.board }}/images/sdcard.img*
           if-no-files-found: ignore
+
 
