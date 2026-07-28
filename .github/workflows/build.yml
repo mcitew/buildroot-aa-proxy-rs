@@ -50,6 +50,13 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
 
+      - name: Prepare Host Directories & Permissions
+        run: |
+          # Create output directories and grant full read/write permissions for Podman rootless mount
+          mkdir -p output/${{ matrix.board }}
+          mkdir -p buildroot/output
+          sudo chmod -R 777 output buildroot/output || true
+
       - name: Build local Podman image
         run: |
           podman build -t aaproxybr .
