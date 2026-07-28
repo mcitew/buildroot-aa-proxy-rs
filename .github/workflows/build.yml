@@ -52,12 +52,7 @@ jobs:
 
       - name: Prepare Host Directories & Permissions
         run: |
-          # Pre-create all download and build directories on the host runner
-          mkdir -p dl
-          mkdir -p buildroot/dl
-          mkdir -p output/${{ matrix.board }}
-          mkdir -p buildroot/output/${{ matrix.board }}
-          # Set wide permissions for Podman rootless mounts
+          mkdir -p dl buildroot/dl output/${{ matrix.board }} buildroot/output/${{ matrix.board }}
           sudo chmod -R 777 dl buildroot/dl output buildroot/output || true
 
       - name: Build local Podman image
@@ -69,9 +64,19 @@ jobs:
           chmod +x ./docker-dev.sh
           ./docker-dev.sh ${{ matrix.board }}
 
+      - name: Debug Output Directory Structure
+        run: |
+          echo "=== Searching for image files in output directories ==="
+          find . -name "*.img*" -o -name "sdcard*" || true
+
       - name: Upload SD Image Artifact
         uses: actions/upload-artifact@v4
+        env:
+          ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
         with:
           name: sdcard-${{ matrix.board }}
-          path: output/${{ matrix.board }}/images/sdcard.img*
-          if-no-files-found: ignore
+          path: |
+            output/${{ matrix.board }}/images/*
+            buildroot/output/${{ matrix.board }}/images/*
+            output/images/*
+          if-no-files-found: warn
