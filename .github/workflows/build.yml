@@ -52,10 +52,13 @@ jobs:
 
       - name: Prepare Host Directories & Permissions
         run: |
-          # Create output directories and grant full read/write permissions for Podman rootless mount
+          # Pre-create all download and build directories on the host runner
+          mkdir -p dl
+          mkdir -p buildroot/dl
           mkdir -p output/${{ matrix.board }}
-          mkdir -p buildroot/output
-          sudo chmod -R 777 output buildroot/output || true
+          mkdir -p buildroot/output/${{ matrix.board }}
+          # Set wide permissions for Podman rootless mounts
+          sudo chmod -R 777 dl buildroot/dl output buildroot/output || true
 
       - name: Build local Podman image
         run: |
