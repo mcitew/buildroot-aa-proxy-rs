@@ -1,0 +1,4 @@
+# Must load dwc2 and libcomposite for Pi Zero 2 W
+modprobe dwc2
+modprobe libcomposite
+modprobe vhci-hcd

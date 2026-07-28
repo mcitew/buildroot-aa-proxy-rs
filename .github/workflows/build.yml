@@ -1,66 +1,76 @@
-name: Build SD images
+name: Build AA-Proxy SD Images
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      target_board:
+        description: 'Select board to build (or "all")'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - rpi02w
+          - radxa03w
 
 jobs:
+  matrix-prep:
+    runs-on: ubuntu-latest
+    outputs:
+      boards: ${{ steps.set-boards.outputs.boards }}
+    steps:
+      - id: set-boards
+        run: |
+          CHOICE="${{ github.event.inputs.target_board }}"
+          if [ "$CHOICE" = "rpi02w" ]; then
+            echo 'boards=["rpi02w"]' >> $GITHUB_OUTPUT
+          elif [ "$CHOICE" = "radxa03w" ]; then
+            echo 'boards=["radxa03w"]' >> $GITHUB_OUTPUT
+          else
+            echo 'boards=["rpi02w", "radxa03w"]' >> $GITHUB_OUTPUT
+          fi
+
   build:
+    needs: matrix-prep
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        board: [ radxa03w ]
+        board: ${{ toJson(fromJson(needs.matrix-prep.outputs.boards)) }}
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Free Disk Space
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          echo "Disk space remaining:"
-          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
 
-      - name: Make Scripts Executable
+      - name: Install Buildroot Host Dependencies
         run: |
-          chmod +x docker-dev.sh || true
-          if [ -f build-image.sh ]; then chmod +x build-image.sh; fi
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libncurses5-dev libssl-dev \
+            bison flex libelf-dev bc git rsync unzip cpio \
+            python3 device-tree-compiler qemu-user-static
 
-      - name: Build Docker Container
-        run: CONTAINER_ENGINE=docker ./docker-dev.sh build
-
-      - name: Build Radxa Zero 3W Image
+      - name: Build Image for ${{ matrix.board }}
         run: |
-          set -e
-          mkdir -p images
-          echo "Building board: ${{ matrix.board }}"
-          CONTAINER_ENGINE=docker ./docker-dev.sh "${{ matrix.board }}"
-          
-          # Check output locations
-          if [ -d "buildroot/output/radxa03w/images" ]; then path="buildroot/output/radxa03w/images";
-          elif [ -d "output/radxa03w/images" ]; then path="output/radxa03w/images";
-          elif [ -d "output/images" ]; then path="output/images";
-          else path="buildroot/output/images"; fi
-          
-          echo "Found build output in: $path"
-          
-          if [ -f "$path/sdcard.img" ]; then
-            xz -c "$path/sdcard.img" > images/radxa03w-sdcard.img.xz
-          else
-            echo "ERROR: sdcard.img not found in $path!"
-            ls -la "$path" || true
-            exit 1
+          # Use official Buildroot script / docker wrapper
+          if [ -f "./docker-dev.sh" ]; then
+            ./docker-dev.sh ${{ matrix.board }}
+          elif [ -f "./build-image.sh" ]; then
+            ./build-image.sh ${{ matrix.board }}
           fi
 
-      - name: Upload SD-card Artifact
+      - name: Upload SD Card Image
         uses: actions/upload-artifact@v4
         with:
-          name: radxa03w-sdcard
-          path: images/radxa03w-sdcard.img.xz
+          name: sdcard-${{ matrix.board }}
+          path: output/${{ matrix.board }}/images/sdcard.img*
           if-no-files-found: error
+
