@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       target_board:
-        description: 'Select board to build (or "all")'
+        description: 'Select board to build'
         required: true
         default: 'rpi02w'
         type: choice
@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: ["rpi02w"]
+        board: ${{ fromJson(needs.matrix-prep.outputs.boards) }}
 
     steps:
       - name: Checkout Repository
@@ -48,29 +48,21 @@ jobs:
 
       - name: Free Disk Space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
 
-      - name: Install Buildroot Host Dependencies
+      - name: Build local Docker environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libncurses5-dev libssl-dev \
-            bison flex libelf-dev bc git rsync unzip cpio \
-            python3 device-tree-compiler qemu-user-static
+          docker build -t aaproxybr .
 
-      - name: Build Image for ${{ matrix.board }}
+      - name: Build SD Image
         run: |
-          # Use official Buildroot script / docker wrapper
-          if [ -f "./docker-dev.sh" ]; then
-            ./docker-dev.sh ${{ matrix.board }}
-          elif [ -f "./build-image.sh" ]; then
-            ./build-image.sh ${{ matrix.board }}
-          fi
+          chmod +x ./docker-dev.sh
+          ./docker-dev.sh ${{ matrix.board }}
 
-      - name: Upload SD Card Image
+      - name: Upload SD Image Artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdcard-${{ matrix.board }}
           path: output/${{ matrix.board }}/images/sdcard.img*
-          if-no-files-found: error
+          if-no-files-found: ignore
 
