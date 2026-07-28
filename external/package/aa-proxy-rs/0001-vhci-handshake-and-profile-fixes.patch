@@ -1,0 +1,192 @@
+diff --git a/src/bluetooth.rs b/src/bluetooth.rs
+index 401ef8d..e37a928 100644
+--- a/src/bluetooth.rs
++++ b/src/bluetooth.rs
+@@ -1,3 +1,4 @@
++
+ use crate::config::Action;
+ use crate::config::SharedConfig;
+ use crate::config::WifiConfig;
+@@ -390,7 +391,9 @@ const SDP_OBEX_OBJECT_PUSH_UUID: Uuid = Uuid::from_u128(0x0000110500001000800000
+ const SDP_AUDIO_SOURCE_UUID: Uuid = Uuid::from_u128(0x0000110a00001000800000805f9b34fb);
+ const SDP_AVRCP_TARGET_UUID: Uuid = Uuid::from_u128(0x0000110c00001000800000805f9b34fb);
+ const SDP_AVRCP_REMOTE_UUID: Uuid = Uuid::from_u128(0x0000110e00001000800000805f9b34fb);
+-const SDP_AVRCP_CONTROLLER_UUID: Uuid = Uuid::from_u128(0x0000110f00001000800000805f9b34fb);
++//const SDP_AVRCP_CONTROLLER_UUID: Uuid = Uuid::from_u128(0x0000110f00001000800000805f9b34fb);
++// 0x110E = AVRCP Controller (Media Receiver / Display)
++const SDP_AVRCP_CONTROLLER_UUID: Uuid = Uuid::from_u128(0x0000110e00001000800000805f9b34fb);
+ const SDP_PANU_UUID: Uuid = Uuid::from_u128(0x0000111500001000800000805f9b34fb);
+ const SDP_NAP_UUID: Uuid = Uuid::from_u128(0x0000111600001000800000805f9b34fb);
+ const SDP_HANDSFREE_AG_UUID: Uuid = Uuid::from_u128(0x0000111f00001000800000805f9b34fb);
+@@ -4470,6 +4473,143 @@ pub struct Bluetooth {
+     phone_like_sdp_profiles_registered: bool,
+ }
+ 
++// Standard Bluetooth Service UUIDs
++pub const A2DP_SINK_UUID: &str = "0000110b-0000-1000-8000-00805f9b34fb";
++pub const AVRCP_TARGET_UUID: &str = "0000110e-0000-1000-8000-00805f9b34fb";
++
++// L2CAP Protocol Service Multiplexers
++pub const PSM_AVRCP: u16 = 23;
++pub const PSM_A2DP: u16 = 25;
++
++/// Register fake A2DP and AVRCP profiles with BlueZ via D-Bus
++pub async fn register_media_sink_profiles(session: &bluer::Session) -> bluer::Result<()> {
++    // 1. A2DP Profile
++    let a2dp_profile = Profile {
++        uuid: A2DP_SINK_UUID.parse().unwrap(),
++        psm: Some(PSM_A2DP),
++        require_authentication: Some(false),
++        require_authorization: Some(false),
++        auto_connect: Some(true),
++        name: Some("Android Auto Media Sink".to_string()),
++        ..Default::default()
++    };
++    
++    if let Err(e) = session.register_profile(a2dp_profile).await {
++        warn!("Failed to register A2DP Sink profile: {:?}", e);
++    } else {
++        info!("Successfully registered synthetic A2DP Sink profile (PSM 25)");
++    }
++
++    // 2. AVRCP Controller Profile (0x110E - Receiver / Display)
++    let avrcp_profile = Profile {
++       uuid: SDP_AVRCP_CONTROLLER_UUID,
++       psm: Some(PSM_AVRCP),
++       require_authentication: Some(false),
++       require_authorization: Some(false),
++       auto_connect: Some(true),
++       //role: Some(bluer::ProfileRole::Client), // Explicitly declare Controller/Client role to BlueZ
++       name: Some("Android Auto AVRCP Controller".to_string()),
++       ..Default::default()
++    };
++
++    if let Err(e) = session.register_profile(avrcp_profile).await {
++        warn!("Failed to register AVRCP Controller profile: {:?}", e);
++    } else {
++        info!("Successfully registered synthetic AVRCP Controller profile (PSM 23)");
++    }
++
++    Ok(())
++}
++
++/// Ensures the Linux virtual Bluetooth kernel module (hci_vhci) is loaded
++fn ensure_vhci_module() {
++    let _ = std::process::Command::new("modprobe").arg("hci_vhci").status();
++}
++
++pub async fn ensure_vhci_adapter_spawned() {
++    use std::sync::Once;
++    use std::io::Write;
++    use std::fs::OpenOptions;
++
++    static VHCI_INIT: Once = Once::new();
++
++    VHCI_INIT.call_once(|| {
++        // 1. Ensure kernel module is loaded first
++        ensure_vhci_module();
++
++        println!("[aa-proxy] Initializing virtual hci1 adapter via /dev/vhci...");
++
++        // 2. Open /dev/vhci and instantiate hci1
++        match OpenOptions::new().read(true).write(true).open("/dev/vhci") {
++           Ok(mut file) => {
++                // Exactly 2 bytes: Packet Type (0xff) + Opcode/DevType (0x01 or 0x00)
++                let vhci_init_pkt: [u8; 2] = [0xff, 0x01];
++
++                if let Err(e) = file.write_all(&vhci_init_pkt) {
++                        eprintln!("[aa-proxy] Failed to write VHCI init bytes: {:?}", e);
++                        return;
++                }
++                println!("[aa-proxy] Successfully spawned hci1 via VHCI!");
++
++                // 3. Keep FD open in background thread so kernel doesn't destroy hci1
++                // 3. Keep FD open AND continuously drain reads so BlueZ initialization doesn't stall
++                std::thread::spawn(move || {
++                   use std::io::{Read, Write};
++                   let mut vhci_file = file;
++                   let mut buf = [0u8; 1024];
++
++                   loop {
++                       match vhci_file.read(&mut buf) {
++                          Ok(n) if n >= 4 => {
++                            // Packet type 0x01 is HCI Command Packet
++                            if buf[0] == 0x01 {
++                              let opcode_gf = buf[1];
++                              let opcode_ocf = buf[2];
++
++                              // Synthesize HCI_Command_Complete Event (0x04)
++                              // Format: [PacketType=0x04, EventCode=0x0e, Plen=0x04, Ncmd=0x01, OpcodeLow, OpcodeHigh, Status=0x00]
++                              let response: [u8; 7] = [
++                                0x04,       // HCI Event Packet
++                                0x0e,       // Command Complete Event
++                                0x04,       // Parameter length
++                                0x01,       // Allowed commands count
++                                opcode_gf,  // Echo back Opcode Low
++                                opcode_ocf, // Echo back Opcode High
++                                0x00,       // Status: Success
++                              ];
++
++                              let _ = vhci_file.write_all(&response);
++                            } 
++                         } 
++                         Ok(_) => {}
++                         Err(e) => {
++                            eprintln!("[aa-proxy] Error reading from VHCI stream: {:?}", e);
++                            break;
++                         }
++                      } 
++                    }
++                });  
++               } 
++               Err(e) => {
++                  eprintln!("[aa-proxy] Failed to open /dev/vhci: {:?}", e);
++               }
++            }
++          }); // Closes VHCI_INIT.call_once
++
++          // 4. Register profiles strictly with the hci1 adapter session
++          if let Ok(session) = bluer::Session::new().await {
++                // Retry loop to give BlueZ up to 2 seconds to see hci1
++                for _ in 0..10 {
++                    if let Ok(adapter) = session.adapter("hci1") {
++                    let _ = adapter.set_powered(true).await;
++                    info!("[aa-proxy] Successfully bound media sink profiles to hci1");
++                    let _ = register_media_sink_profiles(&session).await;
++                    break;
++                } 
++                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
++          } 
++       } 
++}
+ // Create and configure the Bluetooth adapter
+ pub async fn init(
+     btalias: Option<String>,
+@@ -4477,6 +4617,10 @@ pub async fn init(
+     dongle_mode: bool,
+     register_aa_wireless_profile: bool,
+ ) -> Result<Bluetooth> {
++
++
++    // Spawn secondary virtual A2DP Sink on hci1
++    ensure_vhci_adapter_spawned().await;
+     let session = bluer::Session::new().await?;
+     let adapter = session.default_adapter().await?;
+ 
+@@ -6033,7 +6177,7 @@ impl Bluetooth {
+                                 ProxyMessageId::name(hu_id),
+                                 hu_payload.len()
+                             );
+-                            buffered_hu_frames.push((hu_id, hu_payload));
++                            buffered_hu_frames.push((hu_id, hu_payload.to_vec()));
+                             if buffered_hu_frames.len() > 32 {
+                                 return Err("too many HU frames buffered before phone arrived in HU-first rendezvous".into());
+                             }
+@@ -7626,6 +7770,7 @@ impl Bluetooth {
+         let mut hsp_handle = None;
+ 
+         if !self.dongle_mode {
++            ensure_vhci_adapter_spawned().await;
+             let session = bluer::Session::new().await?;
+             let profile = Profile {
+                 uuid: HSP_HS_UUID,
