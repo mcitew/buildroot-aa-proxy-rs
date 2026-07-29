@@ -15,6 +15,9 @@ on:
           - radxa03w
           - all
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
+
 jobs:
   matrix-prep:
     runs-on: ubuntu-latest
@@ -46,37 +49,42 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Free Disk Space
+      - name: Maximize Build Storage
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /var/lib/docker || true
+          sudo apt-get clean || true
 
       - name: Prepare Host Directories & Permissions
         run: |
           mkdir -p dl buildroot/dl output/${{ matrix.board }} buildroot/output/${{ matrix.board }}
           sudo chmod -R 777 dl buildroot/dl output buildroot/output || true
 
-      - name: Build local Podman image
+      - name: Build Local Container Image
         run: |
           podman build -t aaproxybr .
 
-      - name: Build SD Image
+      - name: Run Buildroot Build
         run: |
           chmod +x ./docker-dev.sh
           ./docker-dev.sh ${{ matrix.board }}
 
-      - name: Debug Output Directory Structure
+      - name: Compress SD Image (.xz)
         run: |
-          echo "=== Searching for image files in output directories ==="
-          find . -name "*.img*" -o -name "sdcard*" || true
+          echo "Locating uncompressed images for ${{ matrix.board }}..."
+          IMG_FILE=$(find output/ buildroot/output/ -name "sdcard.img" | head -n 1)
+          
+          if [ -n "$IMG_FILE" ]; then
+            echo "Found image at $IMG_FILE. Compressing with XZ..."
+            xz -v -T0 -9 "$IMG_FILE"
+          else
+            echo "Warning: Uncompressed sdcard.img not found."
+          fi
 
       - name: Upload SD Image Artifact
         uses: actions/upload-artifact@v4
-        env:
-          ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
         with:
-          name: sdcard-${{ matrix.board }}
+          name: sdcard-${{ matrix.board }}.img.xz
           path: |
-            output/${{ matrix.board }}/images/*
-            buildroot/output/${{ matrix.board }}/images/*
-            output/images/*
-          if-no-files-found: warn
+            output/${{ matrix.board }}/images/*.xz
+            buildroot/output/${{ matrix.board }}/images/*.xz
+          if-no-files-found: error
