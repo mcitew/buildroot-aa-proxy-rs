@@ -71,13 +71,14 @@ jobs:
       - name: Compress SD Image (.xz)
         run: |
           echo "Locating uncompressed images for ${{ matrix.board }}..."
-          IMG_FILE=$(find output/ buildroot/output/ -name "sdcard.img" | head -n 1)
+          IMG_FILE=$(sudo find output/ buildroot/output/ -type f -name "sdcard.img" 2>/dev/null | head -n 1)
           
           if [ -n "$IMG_FILE" ]; then
-            echo "Found image at $IMG_FILE. Compressing with XZ..."
-            xz -v -T0 -9 "$IMG_FILE"
+            echo "Found image at $IMG_FILE. Compressing with XZ using sudo..."
+            sudo xz -v -T0 -9 "$IMG_FILE"
           else
-            echo "Warning: Uncompressed sdcard.img not found."
+            echo "Error: Uncompressed sdcard.img not found."
+            exit 1
           fi
 
       - name: Upload SD Image Artifact
