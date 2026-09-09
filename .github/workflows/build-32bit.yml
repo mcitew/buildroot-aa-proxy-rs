@@ -1,0 +1,32 @@
+name: Build 32-bit Release Binary
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  build-armv7:
+    name: Build 32-bit ARM (armv7hf)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-gnueabihf
+
+      - name: Install Cross-Compile Engine
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cross-Compile Binary
+        run: cross build --target armv7-unknown-linux-gnueabihf --release
+
+      - name: Upload Compiled Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aa-proxy-rs-armv7
+          path: target/armv7-unknown-linux-gnueabihf/release/aa-proxy-rs
