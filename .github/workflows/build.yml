@@ -8,10 +8,11 @@ on:
       target_board:
         description: 'Select board to build'
         required: true
-        default: 'rpi02w'
+        default: 'rpi02w_32'
         type: choice
         options:
           - rpi02w
+          - rpi02w_32
           - radxa03w
           - all
 
@@ -29,10 +30,12 @@ jobs:
           CHOICE="${{ github.event.inputs.target_board }}"
           if [ "$CHOICE" = "rpi02w" ]; then
             echo 'boards=["rpi02w"]' >> $GITHUB_OUTPUT
+          elif [ "$CHOICE" = "rpi02w_32" ]; then
+            echo 'boards=["rpi02w_32"]' >> $GITHUB_OUTPUT
           elif [ "$CHOICE" = "radxa03w" ]; then
             echo 'boards=["radxa03w"]' >> $GITHUB_OUTPUT
           else
-            echo 'boards=["rpi02w", "radxa03w"]' >> $GITHUB_OUTPUT
+            echo 'boards=["rpi02w", "rpi02w_32", "radxa03w"]' >> $GITHUB_OUTPUT
           fi
 
   build:
